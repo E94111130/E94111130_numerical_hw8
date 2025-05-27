@@ -1,65 +1,77 @@
-import numpy as np
+import math
+import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.integrate import quad
 
-# Step 1: Setup
-m = 16
-n = 4
-a, b = 0, 1
-x = np.linspace(a, b, m)
-f = lambda x: x**2 * np.sin(x)
-y = f(x)
+# Set pandas display format: float numbers rounded to 4 decimal places
+pd.set_option('display.float_format', '{:.4f}'.format)
 
-# Step 2: Transform [0,1] to [-π, π]
-z = 2 * np.pi * x - np.pi  # map [0,1] -> [-π, π]
+# Define the target function f(x) = x²·sin(x)
+def f(x):
+    return x**2 * math.sin(x)
 
-# Step 3: Compute coefficients for S_4
-a0 = (1/m) * np.sum(y)
-ak = [(2/m) * np.sum(y * np.cos(k * z)) for k in range(1, n)]
-bk = [(2/m) * np.sum(y * np.sin(k * z)) for k in range(1, n)]
+# === Parameter Setup ===
+a, b = 0, 1           # Interval [a, b]
+m = 16                # Half the number of nodes (total nodes N = 2m)
+N = 2 * m
+s = 4                 # Maximum order of Fourier series terms
+h = (b - a) / (N - 1) # Step size between nodes
 
-# Print coefficients
-print(f"a0 / 2 = {a0/2:.6f}")
-for k in range(1, n):
-    print(f"a{k} = {ak[k-1]:.6f}, b{k} = {bk[k-1]:.6f}")
+# Generate N equally spaced nodes x, and corresponding z mapped to [-π, π]
+x = [a + i * h for i in range(N)]
+z = [math.pi * (2 * (xi - a) / (b - a) - 1) for xi in x]  # Linearly map [a, b] → [-π, π]
 
-# Print polynomial expression
-terms = [f"{a0/2:.6f}"]
-for k in range(1, n):
-    terms.append(f"{ak[k-1]:+.6f}*cos({k}z)")
-    terms.append(f"{bk[k-1]:+.6f}*sin({k}z)")
-print("\nS4(x) = " + " ".join(terms))
-print("where z = 2πx - π")
+# Initialize Fourier coefficients A[k], B[k]
+A = [0.0] * (s + 1)
+B = [0.0] * (s + 1)
 
-# Define S4 on x in [0,1]
-def S4(x_val):
-    z_val = 2 * np.pi * x_val - np.pi
-    sum_val = a0 / 2
-    for k in range(1, n):
-        sum_val += ak[k-1] * np.cos(k * z_val) + bk[k-1] * np.sin(k * z_val)
-    return sum_val
+# Approximate the Fourier coefficients using a discrete integration (Simpson-like method)
+for k in range(s + 1):
+    for j in range(N):
+        A[k] += f(x[j]) * math.cos(k * z[j]) / m
+        B[k] += f(x[j]) * math.sin(k * z[j]) / m
 
-# Step 4: Compute ∫ S_4(x) dx over [0,1]
-S4_vec = np.vectorize(S4)
-integral_S4, _ = quad(S4, 0, 1)
-print(f"\nIntegral of S4(x) over [0,1]: {integral_S4:.8f}")
+# Define the approximation function S₄(z), truncated at s = 4 terms
+def S4(z_val):
+    return 0.5 * A[0] + sum(A[k] * math.cos(k * z_val) + B[k] * math.sin(k * z_val) for k in range(1, s + 1))
 
-# Step 5: Compare to true integral ∫ x^2 sin(x) dx
-true_integral, _ = quad(lambda x: x**2 * np.sin(x), 0, 1)
-print(f"True integral of x^2*sin(x) over [0,1]: {true_integral:.8f}")
+# (a)
+print("(a)")
+print(f"a0 = {A[0]:.5f}")
+for k in range(1, s + 1):
+    print(f"a{k} = {A[k]:.5f} , b{k} = {B[k]:.5f}")
 
-# Step 6: Compute error E(S_4)
-S4_values = S4_vec(x)
-error = np.sum((y - S4_values)**2)
-print(f"Error E(S4): {error:.8f}")
+# (b)
+# Apply a trapezoidal-like rule for the approximation
+approx_integral = sum(S4(z[i]) / (N - 1) for i in range(N - 1))
+print(f"\n(b)\n∫₀¹ S4(x)dx = {approx_integral:.5f}")
 
-# Optional: Plot the function and the approximation
-x_plot = np.linspace(0, 1, 400)
-plt.plot(x_plot, f(x_plot), label="f(x) = x² sin(x)")
-plt.plot(x_plot, S4_vec(x_plot), label="S₄(x)", linestyle='--')
-plt.legend()
-plt.title("Discrete Least Squares Trigonometric Approximation")
-plt.grid(True)
-plt.show()
+# (c) 
+fx_vals = [f(xi) for xi in x]             # True function values
+s4_vals = [S4(zi) for zi in z]            # Approximated values from S₄(z)
+pt_errors = [abs(fv - sv) for fv, sv in zip(fx_vals, s4_vals)]  # Absolute error at each point
+
+# Exact value of the integral (from symbolic integration): ∫₀¹ x²·sin(x) dx = cos(1) + 2·sin(1) − 2
+true_integral = math.cos(1) + 2 * math.sin(1) - 2
+abs_err = abs(true_integral - approx_integral)          # Absolute error
+rel_err = abs_err / abs(true_integral) * 100            # Relative error (in percent)
+
+# Display values and errors using a pandas table
+df = pd.DataFrame({
+    'x':         x,
+    'f(x)':      fx_vals,
+    'S4(x)':     s4_vals,
+    'Error':     pt_errors
+})
+
+print("\n(c)")
+print(df.to_string(index=False))  # Clean table output
+
+# Show integration and error results
+print(f"\nTrue Integral: {true_integral:.5f} , S4 Integral: {approx_integral:.5f}")
+print(f"Absolute Error: {abs_err:.5f} , Relative Error: {rel_err:.5f}%")
+
+# === (d) Compute L2 norm of error (square error) ===
+square_error = sum((fx_vals[i] - s4_vals[i])**2 for i in range(N))
+print(f"\n(d)\nE(S4): {square_error:.5f}")
 
 
